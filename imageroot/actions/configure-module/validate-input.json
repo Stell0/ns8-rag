@@ -1,8 +1,51 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "configure-module input",
-    "$id": "http://schema.nethserver.org/kickstart/configure-module-input.json",
-    "description": "Configure kickstart",
+    "$id": "http://schema.nethserver.org/ns8-rag/configure-module-input.json",
+    "description": "Configure ns8-rag",
     "examples": [],
-    "type": "object"
+    "type": "object",
+    "properties": {
+        "sync_interval_minutes": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "embedding_provider": {
+            "type": "string"
+        },
+        "embedding_model": {
+            "type": "string"
+        },
+        "embedding_dimension": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "max_file_size_mb": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "regenerate_user_tokens": {
+            "type": "boolean"
+        },
+        "users": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["principal_id", "username"],
+                "properties": {
+                    "principal_id": {
+                        "type": "string"
+                    },
+                    "username": {
+                        "type": "string"
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        "sources": {
+            "type": "object"
+        }
+    },
+    "additionalProperties": true
 }

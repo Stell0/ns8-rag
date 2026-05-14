@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+
+#
+# Return current sync status snapshot.
+#
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+DEFAULT = {
+    "status": "idle",
+    "current_job_id": None,
+    "queued_at": None,
+    "last_started_at": None,
+    "last_finished_at": None,
+    "last_successful_sync_at": None,
+    "last_error": None,
+}
+
+path = Path(os.environ.get("AGENT_STATE_DIR", os.getcwd())) / "sync-status.json"
+data = json.loads(path.read_text()) if path.exists() else DEFAULT
+json.dump(data, sys.stdout)

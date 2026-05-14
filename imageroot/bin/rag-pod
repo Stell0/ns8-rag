@@ -1,0 +1,313 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+state_dir="${STATE_DIR:-${HOME:-$PWD}/.config/state}"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+schema_file="${script_dir}/../schema.sql"
+module_id="${RAG_MODULE_ID:-${MODULE_ID:-rag1}}"
+pod_name="${module_id}-rag-pod"
+postgres_name="${module_id}-postgres"
+qdrant_name="${module_id}-qdrant"
+parser_name="${module_id}-parser"
+api_name="${module_id}-rag-api"
+worker_name="${module_id}-rag-worker"
+embedder_name="${module_id}-rag-embedder"
+
+postgres_image="${RAG_POSTGRES_IMAGE:-docker.io/library/postgres:16-alpine}"
+qdrant_image="${RAG_QDRANT_IMAGE:-docker.io/qdrant/qdrant:latest}"
+parser_image="${RAG_PARSER_IMAGE:-docker.io/apache/tika:latest}"
+api_image="${RAG_API_IMAGE:-${NS8_RAG_API_IMAGE:-}}"
+worker_image="${RAG_WORKER_IMAGE:-${NS8_RAG_WORKER_IMAGE:-}}"
+embedder_image="${RAG_EMBEDDER_IMAGE:-${NS8_RAG_EMBEDDER_IMAGE:-}}"
+
+current_action=""
+
+log() {
+    echo "[rag-pod] $*" >&2
+}
+
+fail() {
+    log "$*"
+    exit 1
+}
+
+require_var() {
+    local name="$1"
+    local value="$2"
+
+    if [[ -z "${value}" ]]; then
+        fail "Missing required value: ${name}"
+    fi
+}
+
+require_file() {
+    local path="$1"
+
+    if [[ ! -f "${path}" ]]; then
+        fail "Missing required file: ${path}"
+    fi
+}
+
+require_port() {
+    local name="$1"
+    local value="$2"
+
+    if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+        fail "Invalid ${name}: expected integer, got '${value}'"
+    fi
+
+    if (( value < 1 || value > 65535 )); then
+        fail "Invalid ${name}: expected 1-65535, got '${value}'"
+    fi
+}
+
+pod_exists() {
+    /usr/bin/podman pod exists "$1" >/dev/null 2>&1
+}
+
+container_exists() {
+    /usr/bin/podman container exists "$1" >/dev/null 2>&1
+}
+
+image_exists() {
+    /usr/bin/podman image exists "$1" >/dev/null 2>&1
+}
+
+require_image() {
+    local image="$1"
+
+    if ! image_exists "${image}"; then
+        fail "Required image not present in current Podman store: ${image}"
+    fi
+}
+
+dump_container_state() {
+    local name="$1"
+
+    if ! container_exists "${name}"; then
+        log "Container not created: ${name}"
+        return 0
+    fi
+
+    log "Inspecting container: ${name}"
+    /usr/bin/podman inspect "${name}" || true
+    log "Recent logs for container: ${name}"
+    /usr/bin/podman logs --tail 100 "${name}" || true
+}
+
+dump_startup_diagnostics() {
+    log "Collecting startup diagnostics"
+    if pod_exists "${pod_name}"; then
+        /usr/bin/podman pod inspect "${pod_name}" || true
+        /usr/bin/podman ps -a --pod --filter "pod=${pod_name}" || true
+    else
+        log "Pod not created: ${pod_name}"
+    fi
+
+    dump_container_state "${postgres_name}"
+    dump_container_state "${qdrant_name}"
+    dump_container_state "${parser_name}"
+    dump_container_state "${embedder_name}"
+    dump_container_state "${worker_name}"
+    dump_container_state "${api_name}"
+}
+
+on_startup_error() {
+    local exit_code="$1"
+
+    log "Action '${current_action}' failed with exit code ${exit_code}"
+    dump_startup_diagnostics
+    exit "${exit_code}"
+}
+
+enable_startup_trap() {
+    current_action="$1"
+    trap 'on_startup_error "$?"' ERR
+}
+
+disable_startup_trap() {
+    trap - ERR
+    current_action=""
+}
+
+validate_environment() {
+    local tcp_port="${TCP_PORT:-}"
+
+    if [[ ! -d "${state_dir}" ]]; then
+        fail "Missing state directory: ${state_dir}"
+    fi
+
+    require_file "${state_dir}/environment"
+    require_file "${state_dir}/secrets.env"
+    require_file "${schema_file}"
+    require_var "TCP_PORT" "${tcp_port}"
+    require_port "TCP_PORT" "${tcp_port}"
+    require_var "RAG_API_IMAGE or NS8_RAG_API_IMAGE" "${api_image}"
+    require_var "RAG_WORKER_IMAGE or NS8_RAG_WORKER_IMAGE" "${worker_image}"
+    require_var "RAG_EMBEDDER_IMAGE or NS8_RAG_EMBEDDER_IMAGE" "${embedder_image}"
+    require_image "${postgres_image}"
+    require_image "${qdrant_image}"
+    require_image "${parser_image}"
+    require_image "${api_image}"
+    require_image "${worker_image}"
+    require_image "${embedder_image}"
+}
+
+wait_for_running() {
+    local name="$1"
+    local attempts=30
+    local state=""
+
+    while [[ ${attempts} -gt 0 ]]; do
+        state="$(/usr/bin/podman inspect -f '{{.State.Status}}' "${name}" 2>/dev/null || true)"
+        case "${state}" in
+            running)
+                return 0
+                ;;
+            exited|stopped)
+                dump_container_state "${name}"
+                fail "Container failed before reaching running state: ${name}"
+                ;;
+        esac
+        attempts=$((attempts - 1))
+        sleep 1
+    done
+
+    dump_container_state "${name}"
+    fail "Container did not reach running state within timeout: ${name}"
+}
+
+wait_for_postgres() {
+    local attempts=30
+    local state=""
+
+    while [[ ${attempts} -gt 0 ]]; do
+        if /usr/bin/podman exec "${postgres_name}" pg_isready -h 127.0.0.1 -p 5432 -U "${POSTGRES_USER:-rag}" >/dev/null 2>&1; then
+            return 0
+        fi
+
+        if container_exists "${postgres_name}"; then
+            state="$(/usr/bin/podman inspect -f '{{.State.Status}}' "${postgres_name}" 2>/dev/null || true)"
+            case "${state}" in
+                exited|stopped)
+                    dump_container_state "${postgres_name}"
+                    fail "PostgreSQL container stopped before becoming ready"
+                    ;;
+            esac
+        fi
+
+        attempts=$((attempts - 1))
+        sleep 1
+    done
+
+    dump_container_state "${postgres_name}"
+    fail "PostgreSQL did not become ready within timeout"
+}
+
+down() {
+    /usr/bin/podman pod rm -f "${pod_name}" >/dev/null 2>&1 || true
+}
+
+validate() {
+    validate_environment
+    log "Environment validation passed"
+}
+
+up() {
+    enable_startup_trap up
+    validate_environment
+
+    mkdir -p "${state_dir}"/tokens "${state_dir}"/postgresql "${state_dir}"/qdrant "${state_dir}"/model-cache "${state_dir}"/run
+    down
+    /usr/bin/podman pod create --replace --name "${pod_name}" \
+        --network slirp4netns:allow_host_loopback=true \
+        -p "127.0.0.1:${TCP_PORT}:8080"
+
+    /usr/bin/podman run -d --replace --name "${postgres_name}" \
+        --pod "${pod_name}" \
+        --env-file "${state_dir}/secrets.env" \
+        -e PGDATA=/var/lib/postgresql/data/pgdata \
+        -v "${state_dir}/postgresql:/var/lib/postgresql/data:Z" \
+        "${postgres_image}"
+    wait_for_postgres
+    /usr/bin/podman exec -i "${postgres_name}" \
+        psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-rag}" -d "${POSTGRES_DB:-rag}" \
+        < "${schema_file}"
+
+    /usr/bin/podman run -d --replace --name "${qdrant_name}" \
+        --pod "${pod_name}" \
+        -e QDRANT__SERVICE__API_KEY="${QDRANT_API_KEY:-}" \
+        -v "${state_dir}/qdrant:/qdrant/storage:Z" \
+        "${qdrant_image}"
+    wait_for_running "${qdrant_name}"
+
+    /usr/bin/podman run -d --replace --name "${parser_name}" \
+        --pod "${pod_name}" \
+        "${parser_image}"
+    wait_for_running "${parser_name}"
+
+    /usr/bin/podman run -d --replace --name "${embedder_name}" \
+        --pod "${pod_name}" \
+        -v "${state_dir}:/state:Z" \
+        -e STATE_DIR=/state \
+        -e MODEL_CACHE_DIR=/state/model-cache \
+        -e EMBEDDING_DIMENSION="${EMBEDDING_DIMENSION:-1024}" \
+        "${embedder_image}"
+    wait_for_running "${embedder_name}"
+
+    /usr/bin/podman run -d --replace --name "${worker_name}" \
+        --pod "${pod_name}" \
+        --env-file "${state_dir}/environment" \
+        --env-file "${state_dir}/secrets.env" \
+        -v "${state_dir}:/state:Z" \
+        -e STATE_DIR=/state \
+        -e MODEL_CACHE_DIR=/state/model-cache \
+        -e RAG_MODULE_ID="${module_id}" \
+        -e POSTGRES_HOST=127.0.0.1 \
+        -e POSTGRES_PORT=5432 \
+        -e QDRANT_HOST=127.0.0.1 \
+        -e QDRANT_PORT=6333 \
+        -e PARSER_URL=http://127.0.0.1:9998 \
+        -e EMBEDDER_URL=http://127.0.0.1:8090 \
+        "${worker_image}"
+    wait_for_running "${worker_name}"
+
+    /usr/bin/podman run -d --replace --name "${api_name}" \
+        --pod "${pod_name}" \
+        --env-file "${state_dir}/environment" \
+        --env-file "${state_dir}/secrets.env" \
+        -v "${state_dir}:/state:Z" \
+        -e STATE_DIR=/state \
+        -e MODEL_CACHE_DIR=/state/model-cache \
+        -e RAG_MODULE_ID="${module_id}" \
+        -e TCP_PORT="${TCP_PORT}" \
+        -e POSTGRES_HOST=127.0.0.1 \
+        -e POSTGRES_PORT=5432 \
+        -e QDRANT_HOST=127.0.0.1 \
+        -e QDRANT_PORT=6333 \
+        -e EMBEDDER_URL=http://127.0.0.1:8090 \
+        "${api_image}"
+    wait_for_running "${api_name}"
+    disable_startup_trap
+}
+
+case "${1:-}" in
+    up)
+        up
+        ;;
+    down)
+        down
+        ;;
+    restart)
+        down
+        up
+        ;;
+    validate)
+        validate
+        ;;
+    *)
+        echo "Usage: rag-pod {up|down|restart|validate}" >&2
+        exit 1
+        ;;
+esac

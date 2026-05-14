@@ -1,57 +1,101 @@
 {
-    "common": {
-        "required": "Required",
-        "work_in_progress": "Work in progress",
-        "processing": "Processing..."
-    },
-    "status": {
-        "title": "Status",
-        "app_instance": "App instance",
-        "services": "Service | Services",
-        "app_images": "App image | App images",
-        "app_volumes": "App volume | App volumes",
-        "installation_node": "Installation node",
-        "node": "Node",
-        "name": "Name",
-        "size": "Size",
-        "created": "Created",
-        "mount": "Mount",
-        "no_services": "No services",
-        "no_images": "No images",
-        "no_volumes": "No volumes"
-    },
-    "settings": {
-        "title": "Settings",
-        "configure_instance": "Configure {instance}",
-        "save": "Save",
-        "test_field": "Test field"
-    },
-    "about": {
-        "title": "About"
-    },
-    "task": {
-        "cannot_create_task": "Cannot create task {action}"
-    },
-    "action": {
-        "get-status": "Get status",
-        "get-configuration": "Get configuration",
-        "configure-module": "Configure module",
-        "get-module-info": "Get module info",
-        "get-name": "Get name",
-        "list-backup-repositories": "List backup repositories",
-        "list-backups": "List backups",
-        "list-installed-modules": "List installed modules"
-    },
-    "error": {
-        "error": "Error",
-        "generic_error": "Something went wrong",
-        "validation_error": "Validation error",
-        "network_error": "Network error",
-        "network_timeout": "Network timeout",
-        "401": "Invalid authentication",
-        "403": "Operation not authorized",
-        "404": "Resource not found",
-        "cannot_retrieve_module_info": "Cannot retrieve module info",
-        "cannot_retrieve_installed_modules": "Cannot retrieve installed modules"
+  "common": {
+    "required": "Required",
+    "work_in_progress": "Work in progress",
+    "processing": "Processing...",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "status": {
+    "title": "Status",
+    "internal_url": "Internal API URL",
+    "node_id": "Node ID",
+    "same_node_only": "Same-node only",
+    "index_status": "Index status",
+    "sync_title": "Sync",
+    "sync_state": "Sync state",
+    "last_sync_at": "Last sync",
+    "last_successful_sync": "Last successful sync",
+    "start_sync": "Start sync",
+    "refresh": "Refresh",
+    "enabled_sources": "Enabled sources",
+    "source": "Source",
+    "instance": "Instance",
+    "no_enabled_sources": "No enabled sources",
+    "token_title": "User tokens",
+    "principal_id": "Principal ID",
+    "username": "Username",
+    "token_enabled": "Enabled",
+    "last_used_at": "Last used",
+    "actions": "Actions",
+    "regenerate_token": "Regenerate token",
+    "no_tokens": "No tokens configured"
+  },
+  "settings": {
+    "title": "Settings",
+    "save": "Save",
+    "sync_interval_minutes": "Sync interval (minutes)",
+    "embedding_provider": "Embedding provider",
+    "embedding_model": "Embedding model",
+    "embedding_dimension": "Embedding dimension",
+    "max_file_size_mb": "Max file size (MB)",
+    "users_title": "Configured users",
+    "users_text": "Users",
+    "users_help": "One user per line in the format principal_id,username",
+    "invalid_users": "Each user line must be principal_id,username",
+    "sources_title": "Sources",
+    "sources": {
+      "nextcloud": {
+        "enabled": "Enable Nextcloud",
+        "instance": "Nextcloud instance",
+        "mode": "Mode"
+      },
+      "samba": {
+        "enabled": "Enable Samba",
+        "instance": "Samba instance",
+        "shares": "Shares",
+        "shares_help": "Comma-separated share names"
+      },
+      "webtop": {
+        "enabled": "Enable WebTop",
+        "instance": "WebTop instance"
+      },
+      "nethvoice": {
+        "enabled": "Enable NethVoice",
+        "instance": "NethVoice instance"
+      },
+      "mattermost": {
+        "enabled": "Enable Mattermost",
+        "instance": "Mattermost instance"
+      }
     }
+  },
+  "about": {
+    "title": "About"
+  },
+  "task": {
+    "cannot_create_task": "Cannot create task {action}"
+  },
+  "action": {
+    "get-defaults": "Get defaults",
+    "get-configuration": "Get configuration",
+    "configure-module": "Configure module",
+    "get-sync-status": "Get sync status",
+    "start-sync": "Start sync",
+    "regenerate-user-token": "Regenerate user token",
+    "get-module-info": "Get module info",
+    "list-installed-modules": "List installed modules"
+  },
+  "error": {
+    "error": "Error",
+    "generic_error": "Something went wrong",
+    "validation_error": "Validation error",
+    "network_error": "Network error",
+    "network_timeout": "Network timeout",
+    "401": "Invalid authentication",
+    "403": "Operation not authorized",
+    "404": "Resource not found",
+    "cannot_retrieve_module_info": "Cannot retrieve module info",
+    "cannot_retrieve_installed_modules": "Cannot retrieve installed modules"
+  }
 }

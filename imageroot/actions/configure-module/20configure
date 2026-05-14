@@ -1,34 +1,211 @@
 #!/usr/bin/env python3
 
 #
-# Copyright (C) 2023 Nethesis S.r.l.
-# SPDX-License-Identifier: GPL-3.0-or-later
+# Apply ns8-rag configuration:
+# - persist admin-controlled keys to the environment file
+# - synchronize user RAG tokens (generate, keep, revoke)
 #
 
+import hashlib
+import hmac
 import json
-import sys
-import agent
-import agent.tasks
 import os
+import secrets
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import agent
+
+
+def to_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def utcnow():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def token_hash(pepper, token_id, raw_secret):
+    payload = f"{token_id}.{raw_secret}".encode()
+    return hmac.new(pepper.encode(), payload, hashlib.sha256).hexdigest()
+
+
+def new_token(user, pepper):
+    token_id = secrets.token_hex(12)
+    raw_secret = secrets.token_hex(24)
+    now = utcnow()
+    clear = {
+        "principal_id": user["principal_id"],
+        "username": user["username"],
+        "token_id": token_id,
+        "token": f"rag_ut_{token_id}_{raw_secret}",
+    }
+    hash_entry = {
+        "principal_id": user["principal_id"],
+        "username": user["username"],
+        "token_id": token_id,
+        "token_hash": token_hash(pepper, token_id, raw_secret),
+        "enabled": True,
+        "generated_at": now,
+        "revoked_at": None,
+        "last_used_at": None,
+    }
+    return clear, hash_entry
+
+
+def write_json(path, payload):
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    path.chmod(0o600)
+
 
 request = json.load(sys.stdin)
 
-# TODO: do something with the request payload. For example configure a
-# custom route in our web router. Here the path is hardcoded as
-# 'kickstart'.
+state_dir = Path(os.environ["AGENT_STATE_DIR"])
+users_file = state_dir / "tokens" / "users.json"
+hashes_file = state_dir / "tokens" / "hashes.json"
 
-# Configure Traefik to route "/kickstart" path requests to the kickstart service
-response = agent.tasks.run(
-    agent_id=agent.resolve_agent_id('traefik@node'),
-    action='set-route',
-    data={
-        'instance': os.environ['MODULE_ID'],
-        'url':  'http://127.0.0.1:' + os.environ["TCP_PORT"],
-        'http2https': False,
-        'lets_encrypt': False,
-        'path': '/kickstart',
-    },
-)
+users = []
+for entry in request.get("users") or []:
+    principal_id = str(entry.get("principal_id", "")).strip()
+    username = str(entry.get("username", "")).strip()
+    if principal_id and username:
+        users.append({"principal_id": principal_id, "username": username})
 
-# Check if traefik configuration has been successfull
-agent.assert_exp(response['exit_code'] == 0)
+sources_in = request.get("sources") or {}
+
+def src(name):
+    return sources_in.get(name) or {}
+
+samba_shares = [str(s).strip() for s in src("samba").get("shares", []) if str(s).strip()]
+samba_map = {
+    str(share): [str(g).strip() for g in groups if str(g).strip()]
+    for share, groups in (src("samba").get("share_group_map") or {}).items()
+}
+
+# Nextcloud personal-files: per-user roots authenticated as that same user.
+# Public env: list of {principal_id, username, root_path}. Passwords kept in secrets.env only.
+nextcloud_users_public = []
+nextcloud_user_passwords = {}
+for entry in src("nextcloud").get("users") or []:
+    pid = str(entry.get("principal_id", "")).strip()
+    uname = str(entry.get("username", "")).strip()
+    root_path = str(entry.get("root_path", "")).strip().strip("/")
+    password = str(entry.get("password", ""))
+    if not (pid and uname and root_path):
+        continue
+    nextcloud_users_public.append({
+        "principal_id": pid,
+        "username": uname,
+        "root_path": root_path,
+    })
+    if password:
+        nextcloud_user_passwords[uname] = password
+
+env_update = {
+    "SYNC_INTERVAL_MINUTES": int(request.get("sync_interval_minutes", 30)),
+    "EMBEDDING_PROVIDER": str(request.get("embedding_provider", "local")),
+    "EMBEDDING_MODEL": str(request.get("embedding_model", "BAAI/bge-m3")),
+    "EMBEDDING_DIMENSION": int(request.get("embedding_dimension", 1024)),
+    "EMBEDDING_BATCH_SIZE": int(request.get("embedding_batch_size", 16)),
+    "EMBEDDING_DEVICE": str(request.get("embedding_device", "cpu")),
+    "EMBEDDING_NORMALIZE": "true" if to_bool(request.get("embedding_normalize", True), True) else "false",
+    "MAX_FILE_SIZE_MB": int(request.get("max_file_size_mb", 100)),
+    "WORKER_CONCURRENCY": int(request.get("worker_concurrency", 1)),
+    "PARSER_TIMEOUT_SECONDS": int(request.get("parser_timeout_seconds", 120)),
+    "PARSER_MAX_FILE_SIZE_MB": int(request.get("parser_max_file_size_mb", 100)),
+    "PARSER_MAX_EXTRACTED_TEXT_MB": int(request.get("parser_max_extracted_text_mb", 20)),
+    "PARSER_MAX_PAGES": int(request.get("parser_max_pages", 500)),
+    "PARSER_OCR_ENABLED": "true" if to_bool(request.get("parser_ocr_enabled")) else "false",
+    "PARSER_ADVANCED_PDF_ENABLED": "true" if to_bool(request.get("parser_advanced_pdf_enabled")) else "false",
+    "AUDIT_QUERY_MAX_CHARS": int(request.get("audit_query_max_chars", 500)),
+    "AUDIT_RETENTION_DAYS": int(request.get("audit_retention_days", 180)),
+    "FAILED_OBJECT_RETENTION_DAYS": int(request.get("failed_object_retention_days", 30)),
+    "DELETED_OBJECT_RETENTION_DAYS": int(request.get("deleted_object_retention_days", 30)),
+    "RAG_USERS_JSON": json.dumps(users, separators=(",", ":"), sort_keys=True),
+    "NEXTCLOUD_ENABLED": "true" if to_bool(src("nextcloud").get("enabled")) else "false",
+    "NEXTCLOUD_INSTANCE": str(src("nextcloud").get("instance", "")),
+    "NEXTCLOUD_MODE": str(src("nextcloud").get("mode", "personal_files")),
+    "NEXTCLOUD_BASE_URL": str(src("nextcloud").get("base_url", "")).rstrip("/"),
+    "NEXTCLOUD_TLS_VERIFY": "true" if to_bool(src("nextcloud").get("tls_verify", True), True) else "false",
+    "NEXTCLOUD_USERS_JSON": json.dumps(nextcloud_users_public, separators=(",", ":"), sort_keys=True),
+    "SAMBA_ENABLED": "true" if to_bool(src("samba").get("enabled")) else "false",
+    "SAMBA_INSTANCE": str(src("samba").get("instance", "")),
+    "SAMBA_SHARES": json.dumps(samba_shares, separators=(",", ":")),
+    "SAMBA_SHARE_GROUP_MAP_JSON": json.dumps(samba_map, separators=(",", ":"), sort_keys=True),
+    "WEBTOP_ENABLED": "true" if to_bool(src("webtop").get("enabled")) else "false",
+    "WEBTOP_INSTANCE": str(src("webtop").get("instance", "")),
+    "WEBTOP_INGEST_CONTACTS": "true" if to_bool(src("webtop").get("contacts"), True) else "false",
+    "WEBTOP_INGEST_CALENDARS": "true" if to_bool(src("webtop").get("calendars"), True) else "false",
+    "WEBTOP_INGEST_MAIL": "false",
+    "NETHVOICE_ENABLED": "true" if to_bool(src("nethvoice").get("enabled")) else "false",
+    "NETHVOICE_INSTANCE": str(src("nethvoice").get("instance", "")),
+    "NETHVOICE_INGEST_PHONEBOOK": "true" if to_bool(src("nethvoice").get("phonebook"), True) else "false",
+    "NETHVOICE_INGEST_TRANSCRIPTIONS": "true" if to_bool(src("nethvoice").get("transcriptions"), True) else "false",
+    "NETHVOICE_INGEST_RECORDINGS": "false",
+    "MATTERMOST_ENABLED": "true" if to_bool(src("mattermost").get("enabled")) else "false",
+    "MATTERMOST_INSTANCE": str(src("mattermost").get("instance", "")),
+    "MATTERMOST_INGEST_POSTS": "true" if to_bool(src("mattermost").get("posts"), True) else "false",
+    "MATTERMOST_INGEST_FILES": "true" if to_bool(src("mattermost").get("files"), True) else "false",
+    "MATTERMOST_INGEST_DIRECT_MESSAGES": "false",
+}
+
+# Persist environment variables to the public environment file (via NS8 agent),
+# converting non-string values to strings.
+agent.mset_env({k: str(v) for k, v in env_update.items()})
+
+# Update Nextcloud per-user passwords in secrets.env (clear, kept off the public env file).
+# Existing passwords are preserved when the new request does not include the username.
+secrets_map = agent.read_envfile(str(state_dir / "secrets.env"))
+existing_pw = {}
+raw_pw = secrets_map.get("NEXTCLOUD_USER_PASSWORDS_JSON", "")
+if raw_pw:
+    try:
+        existing_pw = json.loads(raw_pw)
+    except json.JSONDecodeError:
+        existing_pw = {}
+merged_pw = {**existing_pw, **nextcloud_user_passwords}
+configured_unames = {u["username"] for u in nextcloud_users_public}
+merged_pw = {u: p for u, p in merged_pw.items() if u in configured_unames}
+secrets_map["NEXTCLOUD_USER_PASSWORDS_JSON"] = json.dumps(merged_pw, separators=(",", ":"), sort_keys=True)
+agent.write_envfile(str(state_dir / "secrets.env"), secrets_map)
+os.chmod(str(state_dir / "secrets.env"), 0o600)
+
+# Synchronize user tokens
+
+# Synchronize user tokens
+secrets_map = agent.read_envfile(str(state_dir / "secrets.env"))
+pepper = secrets_map["RAG_TOKEN_PEPPER"]
+regenerate_all = to_bool(request.get("regenerate_user_tokens"))
+
+clear_data = json.loads(users_file.read_text()) if users_file.exists() else {"tokens": []}
+hash_data = json.loads(hashes_file.read_text()) if hashes_file.exists() else {"tokens": []}
+clear_by_principal = {e["principal_id"]: e for e in clear_data.get("tokens", [])}
+hash_by_principal = {e["principal_id"]: e for e in hash_data.get("tokens", [])}
+
+next_clear = []
+next_hash = []
+configured = {u["principal_id"] for u in users}
+now = utcnow()
+
+for user in users:
+    pid = user["principal_id"]
+    if not regenerate_all and pid in clear_by_principal and pid in hash_by_principal:
+        clear_entry = {**clear_by_principal[pid], "username": user["username"]}
+        hash_entry = {**hash_by_principal[pid], "username": user["username"], "enabled": True, "revoked_at": None}
+    else:
+        clear_entry, hash_entry = new_token(user, pepper)
+    next_clear.append(clear_entry)
+    next_hash.append(hash_entry)
+
+for pid, entry in hash_by_principal.items():
+    if pid in configured:
+        continue
+    next_hash.append({**entry, "enabled": False, "revoked_at": entry.get("revoked_at") or now})
+
+write_json(users_file, {"generated_at": now, "tokens": sorted(next_clear, key=lambda e: e["username"])})
+write_json(hashes_file, {"updated_at": now, "tokens": next_hash})

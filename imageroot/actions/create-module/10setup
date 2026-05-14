@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+#
+# Initialize ns8-rag state on first install:
+# - create state subdirectories with safe permissions
+# - generate module secrets (Postgres password, token pepper, internal secret, Qdrant key)
+# - create empty token files
+#
+
+import json
+import os
+import secrets
+from datetime import datetime, timezone
+from pathlib import Path
+
+import agent
+
+
+state_dir = Path(os.environ["AGENT_STATE_DIR"])
+tokens_dir = state_dir / "tokens"
+secrets_file = state_dir / "secrets.env"
+
+for sub in ("tokens", "postgresql", "qdrant", "model-cache", "run"):
+    (state_dir / sub).mkdir(parents=True, exist_ok=True)
+tokens_dir.chmod(0o700)
+
+environment_file = state_dir / "environment"
+if not environment_file.exists():
+    environment_file.write_text("")
+
+secrets_map = agent.read_envfile(str(secrets_file)) if secrets_file.exists() else {}
+secrets_map.setdefault("POSTGRES_USER", "rag")
+secrets_map.setdefault("POSTGRES_DB", "rag")
+secrets_map.setdefault("POSTGRES_PASSWORD", secrets.token_urlsafe(24))
+secrets_map.setdefault("RAG_INTERNAL_SECRET", secrets.token_urlsafe(32))
+secrets_map.setdefault("RAG_TOKEN_PEPPER", secrets.token_urlsafe(32))
+secrets_map.setdefault("QDRANT_API_KEY", secrets.token_urlsafe(24))
+agent.write_envfile(str(secrets_file), secrets_map)
+secrets_file.chmod(0o600)
+
+now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+for name in ("users.json", "hashes.json"):
+    path = tokens_dir / name
+    if not path.exists():
+        path.write_text(json.dumps({"generated_at": now, "tokens": []}, indent=2) + "\n")
+        path.chmod(0o600)

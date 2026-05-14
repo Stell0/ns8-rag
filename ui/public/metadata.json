@@ -1,19 +1,19 @@
 {
-  "name": "kickstart",
+  "name": "ns8-rag",
   "description": {
-    "en": "My kickstart module"
+    "en": "Internal-only retrieval-augmented generation for NS8"
   },
-  "categories": [],
+  "categories": ["ai", "integration", "productivity"],
   "authors": [
     {
-      "name": "Name Surname",
-      "email": "author@yourmail.org"
+      "name": "Nethesis S.r.l.",
+      "email": "dev@nethesis.it"
     }
   ],
   "docs": {
-    "documentation_url": "https://docs.kickstart.com/",
-    "bug_url": "https://github.com/NethServer/dev",
-    "code_url": "https://github.com/author/ns8-kickstart"
+    "documentation_url": "https://github.com/NethServer/ns8-rag",
+    "bug_url": "https://github.com/NethServer/ns8-rag/issues",
+    "code_url": "https://github.com/NethServer/ns8-rag"
   },
-  "source": "ghcr.io/nethserver/kickstart"
+  "source": "ghcr.io/nethserver/ns8-rag"
 }

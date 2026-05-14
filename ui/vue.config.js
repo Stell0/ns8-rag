@@ -1,6 +1,6 @@
 module.exports = {
   publicPath: "./",
-  // added to fix the build of https://github.com/NethServer/ns8-kickstart/pull/114
+  // Keep axios transpilation enabled to avoid older build/runtime mismatches.
   transpileDependencies: ["axios"],
   configureWebpack: {
     optimization: {

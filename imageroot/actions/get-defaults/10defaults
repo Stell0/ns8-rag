@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+#
+# Return ns8-rag defaults for the UI.
+#
+
+import json
+import sys
+
+
+DEFAULTS = {
+    "sync_interval_minutes": 30,
+    "embedding_provider": "local",
+    "embedding_model": "BAAI/bge-m3",
+    "embedding_dimension": 1024,
+    "embedding_batch_size": 16,
+    "embedding_device": "cpu",
+    "embedding_normalize": True,
+    "max_file_size_mb": 100,
+    "worker_concurrency": 1,
+    "parser_timeout_seconds": 120,
+    "parser_max_file_size_mb": 100,
+    "parser_max_extracted_text_mb": 20,
+    "parser_max_pages": 500,
+    "parser_ocr_enabled": False,
+    "parser_advanced_pdf_enabled": False,
+    "audit_query_max_chars": 500,
+    "audit_retention_days": 180,
+    "failed_object_retention_days": 30,
+    "deleted_object_retention_days": 30,
+    "users": [],
+    "regenerate_user_tokens": False,
+    "sources": {
+        "nextcloud": {"enabled": False, "instance": "", "mode": "personal_files", "base_url": "", "tls_verify": True, "users": []},
+        "samba": {"enabled": False, "instance": "", "shares": [], "share_group_map": {}},
+        "webtop": {"enabled": False, "instance": "", "contacts": True, "calendars": True, "mail": False},
+        "nethvoice": {"enabled": False, "instance": "", "phonebook": True, "transcriptions": True, "recordings": False},
+        "mattermost": {"enabled": False, "instance": "", "posts": True, "files": True, "direct_messages": False},
+    },
+}
+
+json.dump(DEFAULTS, sys.stdout)

@@ -13,39 +13,52 @@ images=()
 # The image will be pushed to GitHub container registry
 repobase="${REPOBASE:-ghcr.io/nethserver}"
 # Configure the image name
-reponame="kickstart"
+reponame="ns8-rag"
+image_tag="${IMAGETAG:-latest}"
+module_image="${repobase}/${reponame}:${image_tag}"
+api_image="${repobase}/${reponame}-api:${image_tag}"
+worker_image="${repobase}/${reponame}-worker:${image_tag}"
+embedder_image="${repobase}/${reponame}-embedder:${image_tag}"
+postgres_image="docker.io/library/postgres:16-alpine"
+qdrant_image="docker.io/qdrant/qdrant:latest"
+parser_image="docker.io/apache/tika:latest"
 
 # Create a new empty container image
 container=$(buildah from scratch)
 
-# Reuse existing nodebuilder-kickstart container, to speed up builds
-if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-kickstart; then
+# Reuse existing nodebuilder-ns8-rag container, to speed up builds
+if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-ns8-rag; then
     echo "Pulling NodeJS runtime..."
-    buildah from --name nodebuilder-kickstart -v "${PWD}:/usr/src:Z" docker.io/library/node:24.15.0-slim
+    buildah from --name nodebuilder-ns8-rag -v "${PWD}:/usr/src:Z" docker.io/library/node:24.15.0-slim
 fi
 
 echo "Build static UI files with node..."
 buildah run \
     --workingdir=/usr/src/ui \
     --env="NODE_OPTIONS=--openssl-legacy-provider" \
-    nodebuilder-kickstart \
-    sh -c "yarn install && yarn build"
+    nodebuilder-ns8-rag \
+    sh -c "corepack yarn install --no-lockfile --ignore-engines && corepack yarn build"
+
+echo "Build runtime images..."
+buildah bud -f images/rag-api/Containerfile -t "${api_image}" .
+buildah bud -f images/rag-worker/Containerfile -t "${worker_image}" .
+buildah bud -f images/rag-embedder/Containerfile -t "${embedder_image}" .
 
 # Add imageroot directory to the container image
 buildah add "${container}" imageroot /imageroot
 buildah add "${container}" ui/dist /ui
 # Setup the entrypoint, ask to reserve one TCP port with the label and set a rootless container
 buildah config --entrypoint=/ \
-    --label="org.nethserver.authorizations=traefik@node:routeadm" \
     --label="org.nethserver.tcp-ports-demand=1" \
     --label="org.nethserver.rootfull=0" \
-    --label="org.nethserver.images=docker.io/jmalloc/echo-server:latest" \
+    --label="org.nethserver.images=${api_image} ${worker_image} ${embedder_image} ${postgres_image} ${qdrant_image} ${parser_image}" \
     "${container}"
 # Commit the image
-buildah commit "${container}" "${repobase}/${reponame}"
+buildah commit "${container}" "${module_image}"
 
 # Append the image URL to the images array
-images+=("${repobase}/${reponame}")
+images+=("${module_image}")
+images+=("${api_image}" "${worker_image}" "${embedder_image}")
 
 #
 # NOTICE:
@@ -66,6 +79,6 @@ if [[ -n "${CI}" ]]; then
 else
     # Just print info for manual push
     printf "Publish the images with:\n\n"
-    for image in "${images[@],,}"; do printf "  buildah push %s docker://%s:%s\n" "${image}" "${image}" "${IMAGETAG:-latest}" ; done
+    for image in "${images[@],,}"; do printf "  buildah push %s docker://%s\n" "${image}" "${image}" ; done
     printf "\n"
 fi

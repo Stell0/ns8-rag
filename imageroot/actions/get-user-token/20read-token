@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+
+#
+# Return the existing RAG token for one configured principal.
+#
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+request = json.load(sys.stdin)
+principal_id = str(request.get("principal_id", "")).strip()
+if not principal_id:
+    raise SystemExit("Missing required field: principal_id")
+
+state_dir = Path(os.environ.get("AGENT_STATE_DIR", os.getcwd()))
+users_file = state_dir / "tokens" / "users.json"
+data = json.loads(users_file.read_text()) if users_file.exists() else {"tokens": []}
+
+entry = next((e for e in data.get("tokens", []) if e.get("principal_id") == principal_id), None)
+if entry is None:
+    raise SystemExit(f"Unknown principal_id: {principal_id}")
+
+tcp_port = os.environ.get("TCP_PORT", "20073")
+node_id = os.environ.get("NODE_ID", "node1")
+
+json.dump({
+    "principal_id": principal_id,
+    "token": entry["token"],
+    "api_url": f"http://127.0.0.1:{tcp_port}/api",
+    "internal_url": f"http://127.0.0.1:{tcp_port}/api",
+    "same_node_only": True,
+    "node_id": node_id,
+}, sys.stdout)

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ns8-rag sync timer
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=30m
+Unit=rag-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ns8-rag maintenance timer
+
+[Timer]
+OnBootSec=30m
+OnUnitActiveSec=1d
+Unit=rag-maintenance.service
+
+[Install]
+WantedBy=timers.target

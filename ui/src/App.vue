@@ -16,17 +16,12 @@
 import AppSideMenu from "./components/AppSideMenu";
 import AppMobileSideMenu from "./components/AppMobileSideMenu";
 import { mapState, mapActions } from "vuex";
-import {
-  QueryParamService,
-  TaskService,
-  UtilService,
-} from "@nethserver/ns8-ui-lib";
-import to from "await-to-js";
+import { QueryParamService, UtilService } from "@nethserver/ns8-ui-lib";
 
 export default {
   name: "App",
   components: { AppSideMenu, AppMobileSideMenu },
-  mixins: [QueryParamService, TaskService, UtilService],
+  mixins: [QueryParamService, UtilService],
   computed: {
     ...mapState(["instanceName", "instanceLabel", "core"]),
   },
@@ -37,7 +32,7 @@ export default {
       window.parent.location.hash
     )[1];
     this.setInstanceNameInStore(instanceName);
-    this.getInstanceLabel();
+    this.setInstanceLabelInStore(instanceName);
     this.setAppName();
 
     // listen to change route events
@@ -68,49 +63,6 @@ export default {
       "setCoreInStore",
       "setAppNameInStore",
     ]),
-    async getInstanceLabel() {
-      const taskAction = "get-name";
-      const eventId = this.getUuid();
-
-      // register to task error
-      this.core.$root.$once(
-        `${taskAction}-aborted-${eventId}`,
-        this.getInstanceLabelAborted
-      );
-
-      // register to task completion
-      this.core.$root.$once(
-        `${taskAction}-completed-${eventId}`,
-        this.getInstanceLabelCompleted
-      );
-
-      const res = await to(
-        this.createModuleTaskForApp(this.instanceName, {
-          action: taskAction,
-          extra: {
-            title: this.$t("action." + taskAction),
-            isNotificationHidden: true,
-            eventId,
-          },
-        })
-      );
-      const err = res[0];
-
-      if (err) {
-        console.error(`error creating task ${taskAction}`, err);
-        this.createErrorNotificationForApp(
-          err,
-          this.$t("task.cannot_create_task", { action: taskAction })
-        );
-        return;
-      }
-    },
-    getInstanceLabelAborted(taskResult, taskContext) {
-      console.error(`${taskContext.action} aborted`, taskResult);
-    },
-    getInstanceLabelCompleted(taskContext, taskResult) {
-      this.setInstanceLabelInStore(taskResult.output.name);
-    },
     setAppName() {
       const metadata = require("../public/metadata.json");
       const appName = metadata.name;

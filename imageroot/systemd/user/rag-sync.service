@@ -1,0 +1,7 @@
+[Unit]
+Description=Queue an ns8-rag sync job
+
+[Service]
+Type=oneshot
+Environment=RAG_MODULE_ID=%u
+ExecStart=/bin/sh -c 'api-cli run module/${RAG_MODULE_ID}/start-sync --data "{}" >/dev/null'

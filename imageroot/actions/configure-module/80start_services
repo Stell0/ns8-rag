@@ -1,12 +1,18 @@
 #!/bin/bash
 
-#
-# Copyright (C) 2023 Nethesis S.r.l.
-# SPDX-License-Identifier: GPL-3.0-or-later
-#
+set -Eeuo pipefail
 
-# If the control reaches this step, the service can be enabled and started
+report_status() {
+	for unit in rag.service rag-sync.timer rag-maintenance.timer; do
+		systemctl --user status "${unit}" --no-pager || true
+	done
+}
 
-touch smarthost.env
+trap report_status ERR
 
-systemctl --user enable --now kickstart.service
+systemctl --user daemon-reload
+systemctl --user reset-failed rag.service rag-sync.timer rag-maintenance.timer || true
+systemctl --user enable --now rag.service rag-sync.timer rag-maintenance.timer
+systemctl --user restart rag.service
+
+trap - ERR

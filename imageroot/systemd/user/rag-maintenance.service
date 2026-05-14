@@ -1,0 +1,6 @@
+[Unit]
+Description=Run ns8-rag maintenance placeholder
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/true

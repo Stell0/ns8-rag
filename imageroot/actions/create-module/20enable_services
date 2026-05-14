@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+systemctl --user daemon-reload
+systemctl --user enable --now rag.service rag-sync.timer rag-maintenance.timer
