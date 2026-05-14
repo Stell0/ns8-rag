@@ -15,5 +15,5 @@ jobs:
     steps:
       - uses: NethServer/ns8-github-actions/.github/actions/delete-image@v1
         with:
-          images: "ns8-rag,ns8-rag-api,ns8-rag-worker,ns8-rag-embedder"
+          images: "rag,rag-api,rag-worker,rag-embedder"
           delete_image_token: ${{ secrets.IMAGES_CLEANUP_TOKEN }}

@@ -13,7 +13,7 @@ images=()
 # The image will be pushed to GitHub container registry
 repobase="${REPOBASE:-ghcr.io/nethserver}"
 # Configure the image name
-reponame="ns8-rag"
+reponame="rag"
 image_tag="${IMAGETAG:-latest}"
 module_image_local="${repobase}/${reponame}"
 api_image_local="${repobase}/${reponame}-api"
