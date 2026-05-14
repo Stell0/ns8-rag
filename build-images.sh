@@ -15,10 +15,14 @@ repobase="${REPOBASE:-ghcr.io/nethserver}"
 # Configure the image name
 reponame="ns8-rag"
 image_tag="${IMAGETAG:-latest}"
-module_image="${repobase}/${reponame}:${image_tag}"
-api_image="${repobase}/${reponame}-api:${image_tag}"
-worker_image="${repobase}/${reponame}-worker:${image_tag}"
-embedder_image="${repobase}/${reponame}-embedder:${image_tag}"
+module_image_local="${repobase}/${reponame}"
+api_image_local="${repobase}/${reponame}-api"
+worker_image_local="${repobase}/${reponame}-worker"
+embedder_image_local="${repobase}/${reponame}-embedder"
+module_image="${module_image_local}:${image_tag}"
+api_image="${api_image_local}:${image_tag}"
+worker_image="${worker_image_local}:${image_tag}"
+embedder_image="${embedder_image_local}:${image_tag}"
 postgres_image="docker.io/library/postgres:16-alpine"
 qdrant_image="docker.io/qdrant/qdrant:latest"
 parser_image="docker.io/apache/tika:latest"
@@ -40,9 +44,9 @@ buildah run \
     sh -c "corepack yarn install --no-lockfile --ignore-engines && corepack yarn build"
 
 echo "Build runtime images..."
-buildah bud -f images/rag-api/Containerfile -t "${api_image}" .
-buildah bud -f images/rag-worker/Containerfile -t "${worker_image}" .
-buildah bud -f images/rag-embedder/Containerfile -t "${embedder_image}" .
+buildah bud -f images/rag-api/Containerfile -t "${api_image_local}" .
+buildah bud -f images/rag-worker/Containerfile -t "${worker_image_local}" .
+buildah bud -f images/rag-embedder/Containerfile -t "${embedder_image_local}" .
 
 # Add imageroot directory to the container image
 buildah add "${container}" imageroot /imageroot
@@ -54,11 +58,11 @@ buildah config --entrypoint=/ \
     --label="org.nethserver.images=${api_image} ${worker_image} ${embedder_image} ${postgres_image} ${qdrant_image} ${parser_image}" \
     "${container}"
 # Commit the image
-buildah commit "${container}" "${module_image}"
+buildah commit "${container}" "${module_image_local}"
 
 # Append the image URL to the images array
-images+=("${module_image}")
-images+=("${api_image}" "${worker_image}" "${embedder_image}")
+images+=("${module_image_local}")
+images+=("${api_image_local}" "${worker_image_local}" "${embedder_image_local}")
 
 #
 # NOTICE:
